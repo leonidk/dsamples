@@ -12,6 +12,7 @@
 #include "misc_gl.h"
 #include "gl_gui.h"
 #include "cnn.h"
+#include "fern.h"
 #include "tcpsocket.h"
 
 
@@ -216,6 +217,7 @@ int main(int argc, char *argv[]) try
 	SOCKET server = INVALID_SOCKET;
 	int enable_server=0;
 
+    ferns::FernClassifier fern_classifier(8, 10, 5, 16, 16);
 
 	while (glwin.WindowUp())
 	{
@@ -231,10 +233,20 @@ int main(int argc, char *argv[]) try
 		for (int i = 0; i < traincount && samples.size() != 0; i++)
 		{
 			trainstarted = true; 
+
 			auto s = std::uniform_int<int>(0, (int)samples.size() - 1)(rng);
-			mse += cnn.Train(samples[s], labels[s]);
+            fern_classifier.sampleBadFeatures();
+            for (int s = 0; s < samples.size(); s++){
+                auto idx = std::distance(labels[s].begin(), std::max_element(labels[s].begin(), labels[s].end()));
+                fern_classifier.train(ferns::Image<float, 2>(16, 16, samples[s].data()), idx);
+            }
+            for (int s = 0; s < samples.size(); s++){
+                auto idx = std::distance(labels[s].begin(), std::max_element(labels[s].begin(), labels[s].end()));
+                auto err = 1.0f - fern_classifier.predict(ferns::Image<float, 2>(16, 16, samples[s].data()))[idx];
+                mse += err*err;
+            }
 		}
-		mse = traincount ? mse / (float)traincount : 0;
+        mse = traincount ? mse / (float)(samples.size()*traincount) : 0;
 		errorhistory[frame % (errorhistory.size() / 2)] = errorhistory[frame % (errorhistory.size() / 2) + (errorhistory.size() / 2)] = sqrt(mse);
 		__int64 cycles_bprop = __rdtsc() - timestart;
 
@@ -285,7 +297,7 @@ int main(int argc, char *argv[]) try
 
 
 		timestart = __rdtsc();
-		auto cnn_out = trainstarted ? cnn.Eval(sample_in) :  std::vector<float>(categories.size(), 0.0f);
+		auto cnn_out = trainstarted ? fern_classifier.predict(ferns::Image<float,2>(16,16,sample_in.data())) :  std::vector<float>(categories.size(), 0.0f);
 		__int64 cycles_fprop = __rdtsc() - timestart;
 		int best = std::max_element(cnn_out.begin(),cnn_out.end())-cnn_out.begin();
 		if(enable_server)
